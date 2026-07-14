@@ -424,7 +424,7 @@ if __name__ == "__main__":
         # 纯视觉测试，不连飞控
         asyncio.run(run(preset_filter, args.height, interface=None))
     else:
-        # 连接飞控用于舵机控制
+        # 连接飞控，仅用于舵机控制 (不上锁，AUX 独立供电)
         async def main_with_px4():
             if not HAS_PX4:
                 print("[错误] mavsdk 未安装，请用 --sim 模式")
@@ -433,19 +433,12 @@ if __name__ == "__main__":
             interface = PX4Interface()
             try:
                 await interface.connect_and_setup()
-                await interface.arm()
             except Exception as e:
                 print(f"[错误] PX4 连接失败: {e}")
                 print("[信息] 回退到纯视觉模式")
                 await run(preset_filter, args.height, interface=None)
                 return
 
-            try:
-                await run(preset_filter, args.height, interface=interface)
-            finally:
-                try:
-                    await interface.disarm()
-                except Exception:
-                    pass
+            await run(preset_filter, args.height, interface=interface)
 
         asyncio.run(main_with_px4())

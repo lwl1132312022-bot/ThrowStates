@@ -1,14 +1,13 @@
 """
-PX4 通信层 — 最简版，仅用于舵机控制。
-=====================================
+PX4 通信层 — 仅连接 + 舵机控制。
+===============================
+不上锁，AUX 独立供电直接驱动舵机。
 室内测试不依赖 GPS，不依赖遥测。
 
 用法:
     interface = PX4Interface()
     await interface.connect_and_setup()
-    await interface.arm()
-    await interface.set_actuator(7, 1.0)   # 释放舵机
-    await interface.disarm()
+    await interface.set_actuator(7, 1.0)
 """
 
 from mavsdk import System
@@ -20,7 +19,7 @@ from config import (
 
 
 class PX4Interface:
-    """最简 PX4 通信 — 连接 / 上锁 / 舵机 / 上锁。"""
+    """最简 PX4 通信 — 连接 + 舵机。"""
 
     def __init__(self, connection_mode: str = CONNECTION_MODE):
         self.drone = System()
@@ -46,6 +45,7 @@ class PX4Interface:
             if state.is_connected:
                 break
         print("[PX4] MAVSDK 连接已建立")
+        print("[PX4] 不上锁 (AUX 独立供电), 可直接控制舵机")
 
         if REQUIRE_GPS:
             print("[PX4] 等待 GPS 锁定...")
@@ -57,25 +57,11 @@ class PX4Interface:
             print("[PX4] 室内模式 — 不等待 GPS, 直接继续")
 
     # ------------------------------------------------------------------
-    # 上锁 / 上锁
-    # ------------------------------------------------------------------
-
-    async def arm(self):
-        """上锁（舵机供电需要飞控处于 armed 状态）。"""
-        await self.drone.action.arm()
-        print("[PX4] 已上锁")
-
-    async def disarm(self):
-        """上锁。"""
-        await self.drone.action.disarm()
-        print("[PX4] 已上锁")
-
-    # ------------------------------------------------------------------
     # 舵机
     # ------------------------------------------------------------------
 
     async def set_actuator(self, index: int, value: float):
-        """AUX 输出控制舵机。
+        """AUX 输出控制舵机 (不上锁也能用，前提是 AUX 排针有独立供电)。
 
         Args:
             index: AUX 通道号 (1-16)
