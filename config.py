@@ -85,7 +85,7 @@ SERIAL_PORT = "/dev/ttyTHS1"
 SERIAL_BAUD = 115200
 
 # 连接模式: "sitl" | "serial"
-CONNECTION_MODE = "sitl"
+CONNECTION_MODE = "serial"
 
 # 室内测试模式 — 跳过 GPS 等待，不依赖遥测
 INDOOR_MODE = True                   # True=室内(跳过GPS), False=室外

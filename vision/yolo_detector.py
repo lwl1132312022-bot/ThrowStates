@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 
-# 默认模型路径 — 相对于本文件所在目录的 models/
+# 默认模型路径 — 项目根目录
 _DEFAULT_MODEL_NAME = "yolov11n_800_best_FP16.engine"
-_DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "models"
+_DEFAULT_MODEL_DIR = Path(__file__).resolve().parent.parent
 
 
 class YOLODetector:
@@ -85,9 +85,9 @@ class YOLODetector:
         mp = self.model_path
         print(f"[YOLO] 查找模型: {mp}")
         if not os.path.exists(mp):
-            print(f"[YOLO] ✗ 模型文件未找到")
-            print(f"[YOLO] → 无模型模式: 使用全帧圆检测")
-            print(f"[YOLO] → 模型应放在: vision/models/")
+            print(f"[YOLO] [FAIL] 模型文件未找到")
+            print(f"[YOLO] -> 无模型模式: 使用全帧圆检测")
+            print(f"[YOLO] -> 模型应放在项目根目录")
             self._model_available = False
             return
 
@@ -99,13 +99,13 @@ class YOLODetector:
             if hasattr(self.model, "names"):
                 self._names = self.model.names
             self._model_available = True
-            print(f"[YOLO] ✓ 模型已加载 [{backend}]")
+            print(f"[YOLO] [OK] 模型已加载 [{backend}]")
             print(f"[YOLO]   类别: {self._names}")
         except ImportError:
-            print(f"[YOLO] ✗ ultralytics 未安装 → 无模型模式")
+            print(f"[YOLO] [FAIL] ultralytics 未安装 -> 无模型模式")
             self._model_available = False
         except Exception as e:
-            print(f"[YOLO] ✗ 加载失败: {e} → 无模型模式")
+            print(f"[YOLO] [FAIL] 加载失败: {e} -> 无模型模式")
             self._model_available = False
 
     # ------------------------------------------------------------------

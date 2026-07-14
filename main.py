@@ -224,7 +224,7 @@ async def run(preset_filter, test_altitude: float, interface=None):
                     if frame_count % log_interval == 1:
                         print(f"    B1匹配: dx={dx:+d} dy={dy:+d} "
                               f"距离={dist:.0f}px "
-                              f"直径={dia_cm:.1f}cm → {'✓' if dia_ok else '✗不匹配'}")
+                              f"直径={dia_cm:.1f}cm -> {'OK' if dia_ok else 'NO MATCH'}")
                     if dia_ok and (best_b1 is None or dist < best_b1[1]):
                         best_b1 = (circle, dist, dia_cm)
 
@@ -238,7 +238,7 @@ async def run(preset_filter, test_altitude: float, interface=None):
                     if frame_count % log_interval == 1:
                         print(f"    B2匹配: dx={dx:+d} dy={dy:+d} "
                               f"距离={dist:.0f}px "
-                              f"直径={dia_cm:.1f}cm → {'✓' if dia_ok else '✗不匹配'}")
+                              f"直径={dia_cm:.1f}cm -> {'OK' if dia_ok else 'NO MATCH'}")
                     if dia_ok and (best_b2 is None or dist < best_b2[1]):
                         best_b2 = (circle, dist, dia_cm)
 
@@ -256,9 +256,9 @@ async def run(preset_filter, test_altitude: float, interface=None):
                         print(f"[投放] B1 触发!")
                         print(f"  圆心: ({circle_b1.cx_px},{circle_b1.cy_px})")
                         print(f"  预设: B1({b1[0]},{b1[1]})")
-                        print(f"  距离: {dist_b1:.0f}px < {zone_radius_px}px ✓")
+                        print(f"  距离: {dist_b1:.0f}px < {zone_radius_px}px OK")
                         print(f"  直径: {dia_b1:.1f}cm "
-                              f"(期望 {B1_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm) ✓")
+                              f"(期望 {B1_EXPECTED_DIAMETER_CM}+/-{EPSILON_DIAMETER_CM}cm) OK")
                         print(f"  高度: {test_altitude}m, Z_C={Z_C:.2f}m")
                         print(f"  舵机: AUX{DROP_SERVO_CHANNEL_1}")
                         print(f"{'='*50}\n")
@@ -276,9 +276,9 @@ async def run(preset_filter, test_altitude: float, interface=None):
                         print(f"[投放] B2 触发!")
                         print(f"  圆心: ({circle_b2.cx_px},{circle_b2.cy_px})")
                         print(f"  预设: B2({b2[0]},{b2[1]})")
-                        print(f"  距离: {dist_b2:.0f}px < {zone_radius_px}px ✓")
+                        print(f"  距离: {dist_b2:.0f}px < {zone_radius_px}px OK")
                         print(f"  直径: {dia_b2:.1f}cm "
-                              f"(期望 {B2_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm) ✓")
+                              f"(期望 {B2_EXPECTED_DIAMETER_CM}+/-{EPSILON_DIAMETER_CM}cm) OK")
                         print(f"  高度: {test_altitude}m, Z_C={Z_C:.2f}m")
                         print(f"  舵机: AUX{DROP_SERVO_CHANNEL_2}")
                         print(f"{'='*50}\n")
@@ -391,8 +391,8 @@ async def run(preset_filter, test_altitude: float, interface=None):
         cap.release()
         cv2.destroyAllWindows()
         print(f"[统计] {frame_count} 帧, "
-              f"B1={'✓' if dropped_b1 else '✗'}, "
-              f"B2={'✓' if dropped_b2 else '✗'}")
+              f"B1={'OK' if dropped_b1 else 'NO'}, "
+              f"B2={'OK' if dropped_b2 else 'NO'}")
 
 
 # =============================================================================
