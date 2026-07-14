@@ -33,7 +33,7 @@ from config import (
     DROP_SERVO_CHANNEL_1, DROP_SERVO_CHANNEL_2,
     USE_SERVO,
     CAMERA_DEVICE, CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FPS,
-    DROP_MAX_ANGULAR_RATE, DROP_MAX_VELOCITY,
+    APPLY_UNDISTORT,
 )
 from vision import VisionPipeline
 
@@ -118,7 +118,7 @@ async def run(preset_filter, test_altitude: float, interface=None):
         test_altitude: 固定测试高度 (米), 用于预设点计算
         interface:     PX4Interface 或 None (纯视觉模式)
     """
-    pipeline = VisionPipeline()
+    pipeline = VisionPipeline(apply_undistort=APPLY_UNDISTORT)
     cap = open_camera()
 
     cv2.namedWindow("ThrowStates", cv2.WINDOW_NORMAL)
@@ -126,7 +126,6 @@ async def run(preset_filter, test_altitude: float, interface=None):
 
     dropped_b1 = False
     dropped_b2 = False
-    no_vision_count = 0           # 连续无视觉数据计数 (SITL 回退用)
     frame_count = 0
     fps_start = time.time()
 
@@ -137,12 +136,19 @@ async def run(preset_filter, test_altitude: float, interface=None):
     B2_EXPECTED_DIAMETER_CM = 20.0
 
     print(f"[任务] 预设点: {preset_filter}, 测试高度: {test_altitude}m")
+    print(f"[任务] 畸变校正: {'开' if APPLY_UNDISTORT else '关'}")
     print(f"[任务] 直径匹配: B1={B1_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm, "
           f"B2={B2_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm")
+    print(f"[任务] 舵机通道: B1=AUX{DROP_SERVO_CHANNEL_1}, B2=AUX{DROP_SERVO_CHANNEL_2}")
+    print(f"[任务] USE_SERVO={USE_SERVO}, interface={'PX4' if interface else 'None'}")
     print("[任务] 按 'q' 退出\n")
+
+    # 帧率统计
+    log_interval = 20  # 每 N 帧打印一次详细日志
 
     try:
         while True:
+            loop_start = time.time()
             ret, frame = cap.read()
             if not ret:
                 print("[错误] 帧读取失败")
@@ -150,8 +156,10 @@ async def run(preset_filter, test_altitude: float, interface=None):
             frame_count += 1
 
             # ── 1. 视觉处理 ──
+            t0 = time.time()
             results = pipeline.process_frame(
                 frame, alt_rel_m=test_altitude, return_annotated=True)
+            t_vision = (time.time() - t0) * 1000  # ms
 
             annotated = frame.copy()
             for r in results:
@@ -162,65 +170,81 @@ async def run(preset_filter, test_altitude: float, interface=None):
             # ── 2. 计算预设点 ──
             b1, b2, zone_radius_px = pipeline.compute_preset_points(
                 test_altitude)
+            Z_C = test_altitude + 0.036 - 0.30  # 相机到桶顶距离
 
-            # ── 3. 筛选有效检测 (移植自 DropState._check_drop_zone) ──
+            # ── 3. 筛选有效检测 ──
             valid_circles = [
                 r for r in results
                 if r.get("edge_success") and r["circle"] is not None
             ]
+            total_dets = len([r for r in results if "annotated_frame" not in r])
+            yolo_dets = len([r for r in results
+                            if r.get("det") is not None and "annotated_frame" not in r])
 
-            if not valid_circles:
-                no_vision_count += 1
-            else:
-                no_vision_count = 0
+            # 每 N 帧打印一次详细状态
+            if frame_count % log_interval == 1:
+                elapsed = time.time() - fps_start
+                fps = frame_count / elapsed if elapsed > 0 else 0
+                print(f"\n── 帧 {frame_count} (FPS:{fps:.0f} H:{test_altitude}m "
+                      f"Z_C:{Z_C:.2f}m) ──")
+                print(f"  视觉耗时: {t_vision:.0f}ms")
+                print(f"  YOLO检测: {yolo_dets}个桶, "
+                      f"边缘成功: {len(valid_circles)}个圆")
+                print(f"  预设点: B1=({b1[0]},{b1[1]}) "
+                      f"B2=({b2[0]},{b2[1]}) "
+                      f"投放范围半径={zone_radius_px}px")
 
-            # ── 4. 对每个预设点, 找到最佳的匹配圆 ──
-            # 原始逻辑 (drop.py:117-128):
-            #   遍历所有圆, 取距离预设点最近的, 判断距离 < zone_radius_px
-            #   同时做直径匹配 (SearchState:374-376):
-            #     abs(dia_cm - 15) <= EPSILON 或 abs(dia_cm - 20) <= EPSILON
+            # ── 4. 对每个检测到的圆打印详情 ──
+            for r in valid_circles:
+                circle = r["circle"]
+                dia_cm = circle.diameter_m * 100
+                if frame_count % log_interval == 1:
+                    print(f"  检测圆: 圆心=({circle.cx_px},{circle.cy_px}) "
+                          f"半径={circle.radius_px}px "
+                          f"直径={dia_cm:.1f}cm "
+                          f"(期望B1={B1_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM} "
+                          f"B2={B2_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM})")
 
-            best_b1 = None   # (circle, dist_px, dia_cm)
+            # ── 5. 找最佳匹配圆 ──
+            best_b1 = None
             best_b2 = None
 
             for r in valid_circles:
                 circle = r["circle"]
-                dia_cm = circle.diameter_m * 100  # 米 → 厘米
+                dia_cm = circle.diameter_m * 100
                 cx, cy = circle.cx_px, circle.cy_px
 
-                # --- B1: 距离 + 直径匹配 (15cm±2) ---
+                # B1: 直径匹配 (15cm±2) + 最近距离
                 if (preset_filter in ("both", 1)
                         and not dropped_b1 and b1[0] >= 0):
                     dx = cx - b1[0]
                     dy = cy - b1[1]
                     dist = math.hypot(dx, dy)
                     dia_ok = abs(dia_cm - B1_EXPECTED_DIAMETER_CM) <= EPSILON_DIAMETER_CM
+                    if frame_count % log_interval == 1:
+                        print(f"    B1匹配: dx={dx:+d} dy={dy:+d} "
+                              f"距离={dist:.0f}px "
+                              f"直径={dia_cm:.1f}cm → {'✓' if dia_ok else '✗不匹配'}")
                     if dia_ok and (best_b1 is None or dist < best_b1[1]):
                         best_b1 = (circle, dist, dia_cm)
 
-                # --- B2: 距离 + 直径匹配 (20cm±2) ---
+                # B2: 直径匹配 (20cm±2) + 最近距离
                 if (preset_filter in ("both", 2)
                         and not dropped_b2 and b2[0] >= 0):
                     dx = cx - b2[0]
                     dy = cy - b2[1]
                     dist = math.hypot(dx, dy)
                     dia_ok = abs(dia_cm - B2_EXPECTED_DIAMETER_CM) <= EPSILON_DIAMETER_CM
+                    if frame_count % log_interval == 1:
+                        print(f"    B2匹配: dx={dx:+d} dy={dy:+d} "
+                              f"距离={dist:.0f}px "
+                              f"直径={dia_cm:.1f}cm → {'✓' if dia_ok else '✗不匹配'}")
                     if dia_ok and (best_b2 is None or dist < best_b2[1]):
                         best_b2 = (circle, dist, dia_cm)
 
-            # ── 5. 稳定性检查 + 投放判断 ──
+            # ── 6. 投放判断 ──
             in_zone_b1 = False
             in_zone_b2 = False
-
-            # 查询飞控稳定性 (interface 不可用时跳过)
-            is_stable = True
-            ang_rate = 0.0
-            vel = 0.0
-            if interface is not None:
-                try:
-                    is_stable, ang_rate, vel = await interface.is_stable()
-                except Exception:
-                    is_stable = False
 
             # B1
             if best_b1 is not None:
@@ -228,29 +252,19 @@ async def run(preset_filter, test_altitude: float, interface=None):
                 if dist_b1 < zone_radius_px:
                     in_zone_b1 = True
                     if not dropped_b1:
-                        if is_stable:
-                            print(f"[投放] B1 进入范围! "
-                                  f"圆心({circle_b1.cx_px},{circle_b1.cy_px}) "
-                                  f"距离={dist_b1:.0f}px < {zone_radius_px}px, "
-                                  f"直径={dia_b1:.1f}cm, "
-                                  f"角速率={ang_rate:.3f}rad/s, 速度={vel:.3f}m/s")
-                            dropped_b1 = True
-                            await release_servo(
-                                interface, DROP_SERVO_CHANNEL_1, "B1(AUX7)")
-                        else:
-                            # 进入了范围但飞机还不稳定, 不打舵机
-                            if frame_count % 20 == 0:
-                                print(f"[等待] B1 在范围内但飞机不稳定: "
-                                      f"角速率={ang_rate:.3f} > {DROP_MAX_ANGULAR_RATE} "
-                                      f"或 速度={vel:.3f} > {DROP_MAX_VELOCITY}")
-
-            # SITL 回退: 连续无视觉数据 → 放行 (移植自 drop.py:105-107)
-            if (preset_filter in ("both", 1)
-                    and not dropped_b1 and no_vision_count > 50):
-                print("[投放] B1: 无视觉数据, SITL 模式放行")
-                dropped_b1 = True
-                await release_servo(
-                    interface, DROP_SERVO_CHANNEL_1, "B1(AUX7)")
+                        print(f"\n{'='*50}")
+                        print(f"[投放] B1 触发!")
+                        print(f"  圆心: ({circle_b1.cx_px},{circle_b1.cy_px})")
+                        print(f"  预设: B1({b1[0]},{b1[1]})")
+                        print(f"  距离: {dist_b1:.0f}px < {zone_radius_px}px ✓")
+                        print(f"  直径: {dia_b1:.1f}cm "
+                              f"(期望 {B1_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm) ✓")
+                        print(f"  高度: {test_altitude}m, Z_C={Z_C:.2f}m")
+                        print(f"  舵机: AUX{DROP_SERVO_CHANNEL_1}")
+                        print(f"{'='*50}\n")
+                        dropped_b1 = True
+                        await release_servo(
+                            interface, DROP_SERVO_CHANNEL_1, "B1(AUX7)")
 
             # B2
             if best_b2 is not None:
@@ -258,27 +272,19 @@ async def run(preset_filter, test_altitude: float, interface=None):
                 if dist_b2 < zone_radius_px:
                     in_zone_b2 = True
                     if not dropped_b2:
-                        if is_stable:
-                            print(f"[投放] B2 进入范围! "
-                                  f"圆心({circle_b2.cx_px},{circle_b2.cy_px}) "
-                                  f"距离={dist_b2:.0f}px < {zone_radius_px}px, "
-                                  f"直径={dia_b2:.1f}cm, "
-                                  f"角速率={ang_rate:.3f}rad/s, 速度={vel:.3f}m/s")
-                            dropped_b2 = True
-                            await release_servo(
-                                interface, DROP_SERVO_CHANNEL_2, "B2(AUX8)")
-                        else:
-                            if frame_count % 20 == 0:
-                                print(f"[等待] B2 在范围内但飞机不稳定: "
-                                      f"角速率={ang_rate:.3f} > {DROP_MAX_ANGULAR_RATE} "
-                                      f"或 速度={vel:.3f} > {DROP_MAX_VELOCITY}")
-
-            if (preset_filter in ("both", 2)
-                    and not dropped_b2 and no_vision_count > 50):
-                print("[投放] B2: 无视觉数据, SITL 模式放行")
-                dropped_b2 = True
-                await release_servo(
-                    interface, DROP_SERVO_CHANNEL_2, "B2(AUX8)")
+                        print(f"\n{'='*50}")
+                        print(f"[投放] B2 触发!")
+                        print(f"  圆心: ({circle_b2.cx_px},{circle_b2.cy_px})")
+                        print(f"  预设: B2({b2[0]},{b2[1]})")
+                        print(f"  距离: {dist_b2:.0f}px < {zone_radius_px}px ✓")
+                        print(f"  直径: {dia_b2:.1f}cm "
+                              f"(期望 {B2_EXPECTED_DIAMETER_CM}±{EPSILON_DIAMETER_CM}cm) ✓")
+                        print(f"  高度: {test_altitude}m, Z_C={Z_C:.2f}m")
+                        print(f"  舵机: AUX{DROP_SERVO_CHANNEL_2}")
+                        print(f"{'='*50}\n")
+                        dropped_b2 = True
+                        await release_servo(
+                            interface, DROP_SERVO_CHANNEL_2, "B2(AUX8)")
 
             # ── 6. 在图上标记: 圆心进入范围 → 绿色高亮 ──
             hit_circle = best_b1[0] if in_zone_b1 else (best_b2[0] if in_zone_b2 else None)
@@ -357,9 +363,6 @@ async def run(preset_filter, test_altitude: float, interface=None):
                 fps = frame_count / elapsed if elapsed > 0 else 0
 
             parts = [f"FPS:{fps:.0f}", f"H:{test_altitude}m"]
-            if interface is not None:
-                parts.append(f"ang:{ang_rate:.2f}rad/s")
-                parts.append(f"vel:{vel:.2f}m/s")
             if preset_filter in ("both", 1):
                 parts.append("B1:HIT" if in_zone_b1
                              else "B1:DONE" if dropped_b1

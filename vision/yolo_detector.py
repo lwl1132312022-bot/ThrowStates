@@ -83,10 +83,11 @@ class YOLODetector:
     def _load(self):
         """加载模型。如果模型文件不存在，进入无模型模式。"""
         mp = self.model_path
+        print(f"[YOLO] 查找模型: {mp}")
         if not os.path.exists(mp):
-            print(f"[YOLO] 模型文件未找到: {mp}")
-            print(f"[YOLO] 进入无模型模式 — 将使用全帧圆检测作为回退")
-            print(f"[YOLO] 如需 YOLO 检测，请将模型放到 vision/models/ 目录")
+            print(f"[YOLO] ✗ 模型文件未找到")
+            print(f"[YOLO] → 无模型模式: 使用全帧圆检测")
+            print(f"[YOLO] → 模型应放在: vision/models/")
             self._model_available = False
             return
 
@@ -98,12 +99,13 @@ class YOLODetector:
             if hasattr(self.model, "names"):
                 self._names = self.model.names
             self._model_available = True
-            print(f"[YOLO] 模型已加载: {mp} [{backend}]")
+            print(f"[YOLO] ✓ 模型已加载 [{backend}]")
+            print(f"[YOLO]   类别: {self._names}")
         except ImportError:
-            print(f"[YOLO] ultralytics 未安装，进入无模型模式")
+            print(f"[YOLO] ✗ ultralytics 未安装 → 无模型模式")
             self._model_available = False
         except Exception as e:
-            print(f"[YOLO] 模型加载失败 ({e})，进入无模型模式")
+            print(f"[YOLO] ✗ 加载失败: {e} → 无模型模式")
             self._model_available = False
 
     # ------------------------------------------------------------------

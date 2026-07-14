@@ -133,9 +133,14 @@ class VisionPipeline:
             bucket_dets = self.yolo.get_class1_detections(
                 dets, self.circle_conf_threshold
             )
+            print(f"  [YOLO] 总检测={len(dets)}个, "
+                  f"桶(cls=1)={len(bucket_dets)}个 "
+                  f"(conf≥{self.circle_conf_threshold})")
 
             for det in bucket_dets:
                 bbox = (det["x1"], det["y1"], det["x2"], det["y2"])
+                print(f"  [YOLO] 桶: bbox=({det['x1']},{det['y1']},"
+                      f"{det['x2']},{det['y2']}) conf={det['conf']:.2f}")
                 result = self._detect_and_compute(frame, bbox, alt_rel_m)
                 if result is not None:
                     result["det"] = det
@@ -149,6 +154,7 @@ class VisionPipeline:
         else:
             h, w = frame.shape[:2]
             bbox = (0, 0, w, h)
+            print(f"  [全帧] 无YOLO模型, 全帧检测 {w}×{h}")
             result = self._detect_and_compute(frame, bbox, alt_rel_m)
             if result is not None:
                 result["det"] = None  # 无 YOLO 检测

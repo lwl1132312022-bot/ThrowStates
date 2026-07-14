@@ -173,20 +173,25 @@ class CircleDetector:
         """
         x1, y1, x2, y2 = bbox
         h, w = frame.shape[:2]
+        bw, bh = x2 - x1, y2 - y1
 
         # ---- 边缘距检查: 跳过贴近画面边缘的截断框 ----
         if (x1 < self.edge_margin_px or y1 < self.edge_margin_px or
                 x2 > w - self.edge_margin_px or y2 > h - self.edge_margin_px):
+            print(f"  [圆检测] bbox({x1},{y1},{x2},{y2}) 贴边, 跳过")
             return None
 
         # 1. 提取 ROI (带 padding)
         roi, roi_x1, roi_y1 = self._extract_roi(frame, x1, y1, x2, y2)
         if roi.size == 0:
+            print(f"  [圆检测] ROI 为空, 跳过")
             return None
 
         # 2. 圆检测
         circle_roi = self._detect_circle_in_roi(roi)
         if circle_roi is None:
+            print(f"  [圆检测] bbox({x1},{y1},{x2},{y2}) "
+                  f"尺寸={bw}×{bh} → 未检测到圆")
             return None
 
         cx_roi, cy_roi, radius = circle_roi
@@ -194,6 +199,10 @@ class CircleDetector:
         # 3. 转换到全帧坐标
         cx_full = roi_x1 + cx_roi
         cy_full = roi_y1 + cy_roi
+
+        print(f"  [圆检测] bbox({x1},{y1},{x2},{y2}) "
+              f"尺寸={bw}×{bh} → 圆@({cx_full},{cy_full}) "
+              f"半径={radius}px")
 
         return CircleResult(
             cx_px=cx_full,
@@ -277,6 +286,7 @@ class CircleDetector:
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL,
                                         cv2.CHAIN_APPROX_SIMPLE)
         if len(contours) == 0:
+            print(f"    [Canny] 边缘={np.count_nonzero(edges)}px, 轮廓=0 → 无圆")
             return None
 
         # Step 5: 筛选最大轮廓
@@ -285,6 +295,7 @@ class CircleDetector:
         # Step 6: 凸包 — 闭合 Canny 断口, 让弧段变成近似圆
         hull = cv2.convexHull(cnt) if self.use_convex_hull else cnt
         if len(hull) < 5:
+            print(f"    [凸包] 点数={len(hull)} < 5 → 不足以拟合")
             return None
 
         # Step 7: 圆度过滤 (在凸包上计算, 闭合的弧段 ≈ 圆)
@@ -294,6 +305,7 @@ class CircleDetector:
             return None
         circularity = 4.0 * np.pi * area / (peri * peri)
         if circularity < self.circularity_threshold:
+            print(f"    [圆度] {circularity:.3f} < {self.circularity_threshold} → 剔除")
             return None
 
         # Step 8: 椭圆拟合 (用原始轮廓, 凸包的弦会扭曲椭圆)
@@ -303,6 +315,10 @@ class CircleDetector:
         (cx, cy), (d1, d2), _angle = ellipse
         diameter_px = (d1 + d2) / 2.0
         radius = int(round(diameter_px / 2.0))
+
+        print(f"    [拟合] 轮廓数={len(contours)} 圆度={circularity:.3f} "
+              f"椭圆=({cx:.0f},{cy:.0f}) "
+              f"d1={d1:.0f} d2={d2:.0f} 半径={radius}px")
 
         return int(round(cx)), int(round(cy)), radius
 
