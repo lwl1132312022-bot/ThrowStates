@@ -412,6 +412,9 @@ def parse_args():
     parser.add_argument(
         "--height", type=float, default=DROP_ALIGN_ALTITUDE_M,
         help=f"测试高度/米 (默认: {DROP_ALIGN_ALTITUDE_M})")
+    parser.add_argument(
+        "--test-servo", type=int, default=0, metavar="CH",
+        help="舵机测试: 只连飞控, 循环测试指定通道 (无视视觉)")
     return parser.parse_args()
 
 
@@ -419,6 +422,28 @@ if __name__ == "__main__":
     args = parse_args()
 
     preset_filter = "both" if args.preset == "both" else int(args.preset)
+
+    # 舵机测试模式 — 绕过视觉，直接测舵机
+    if args.test_servo:
+        async def test_servo():
+            if not HAS_PX4:
+                print("[错误] mavsdk 未安装")
+                return
+            interface = PX4Interface()
+            await interface.connect_and_setup()
+            ch = args.test_servo
+            print(f"\n[舵机测试] 通道 AUX{ch}, 循环 3 次 (开1s/关1s)")
+            for i in range(3):
+                print(f"  第 {i+1}/3 次: 打开...")
+                await interface.set_actuator(ch, 1.0)
+                await asyncio.sleep(1.0)
+                print(f"  第 {i+1}/3 次: 关闭...")
+                await interface.set_actuator(ch, -1.0)
+                await asyncio.sleep(1.0)
+            print("[舵机测试] 完成")
+
+        asyncio.run(test_servo())
+        sys.exit(0)
 
     if args.sim:
         # 纯视觉测试，不连飞控

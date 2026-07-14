@@ -54,5 +54,9 @@ class PX4Interface:
             index: AUX 通道号 (1-16)
             value: -1.0 ~ 1.0
         """
-        await self.drone.action.set_actuator(index, value)
-        print(f"[舵机] AUX{index} -> {value:.2f}")
+        try:
+            await self.drone.action.set_actuator(index, value)
+            print(f"[舵机] AUX{index} -> {value:.2f}  已发送")
+            print(f"[舵机] 如果舵机没动，请在 QGC 设置 COM_PREARM_MODE=1")
+        except Exception as e:
+            print(f"[舵机] AUX{index} 发送失败: {e}")
